@@ -1,0 +1,18 @@
+{
+  "name": "testHelper",
+  "version": "0.0.1",
+  "main": "app.js",
+  "dependencies": {
+    "googleapis": "^39.2.0",
+    "img-diff-js": "^0.4.1",
+    "jquery": "^3.4.1",
+    "nedb-async": "^0.1.3",
+    "node-notifier": "^6.0.0",
+    "playwright": "^0.9.24",
+    "upload-gphotos": "^4.2.1"
+  },
+  "devDependencies": {},
+  "scripts": {},
+  "author": "Denis Anurkin",
+  "license": "ISC"
+}
