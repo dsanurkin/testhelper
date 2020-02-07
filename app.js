@@ -20,8 +20,23 @@ function checkRegress(image1, image2, diff){
     }).then(result => console.log(result.imagesAreSame));
 }
 
+async function getDate(){
+    let today = new Date();
+    let dd = String(today.getDate()).padStart(2, '0');
+    let mm = String(today.getMonth() + 1).padStart(2, '0');
+    let yyyy = today.getFullYear();
+    let hours = today.getHours() + '_' + today.getMinutes();
+    today = mm + '-' + dd + '-' + yyyy + '-' + hours;
+    return today
+}
+
+function filterLink(link){
+    link = link.replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '');
+    return link     
+}
+
 async function findInDatabase(name) {
-    name = name.replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '')            
+    name = filterLink(name);        
     let findLinks = await data.asyncFind({ name: name });
     if (findLinks.length > 0) {
         console.log('Список ссылок найден!')
@@ -72,51 +87,58 @@ async function makeDeviceScreenshot(urls, dev) {
         });
         const page = await context.newPage(urls[i], { waitUntil: 'load' });
         await page.setDefaultNavigationTimeout(0);
-        const screenshot_name = urls[i].replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '')
+        const screenshot_name = filterLink(urls[i]);
         await page.screenshot({path: 'screenshots/' + dev + '/' + screenshot_name + '.png', fullPage: true});
         await browser.close();
     }
 }
 
-async function mkScreenshots(customLinks, br) {
+async function mkScreenshots(mainLink, customLinks, browsers) {
     let links = new Array();
     let imagesData = {
         names: new Array(),
         localPaths: new Array(),
         gdriveLinks: new Array(),
         folderLink: null,
-        sitename: null,
+        sitename: null
     }
 
-    if (customLinks.length > 0) {
-        links = customLinks;
-        let siteName = links[links.length - 1].replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '');
-        let fileData = {
-            name: siteName,
-            links: links
+    if (mainLink) {
+        let linksFound = await findInDatabase(mainLink);
+        if (linksFound) {
+            siteName = filterLink(mainLink);
+            links = linksFound;
+            if (customLinks.length > 0) {
+                for(let i = 0; i < customLinks.length; i++) { links.push(customLinks[i]) }
+            }
+        } else {
+            siteName = filterLink(mainLink);
+            links = customLinks;
+            links.push(mainLink);
+            let fileData = {
+                name: siteName,
+                links: links
+            }
+            await data.asyncInsert(fileData)
         }
-        await data.asyncInsert(fileData)
-        
     } else {
-        let siteName = await getLinkFromTask();
+        siteName = await getLinkFromTask();
         links = await findInDatabase(siteName);
-        imagesData.sitename = siteName;
+        if (customLinks.length > 0) {
+            for(let i = 0; i < customLinks.length; i++) { links.push(customLinks[i]) }
+        }
     }
 
     if (links.length > 0) { 
-        await console.log('Начинаем тестирование')
-        let today = new Date();
-        let dd = String(today.getDate()).padStart(2, '0');
-        let mm = String(today.getMonth() + 1).padStart(2, '0');
-        let yyyy = today.getFullYear();
-        let hours = today.getHours() + '_' + today.getMinutes();
-        today = mm + '-' + dd + '-' + yyyy + '-' + hours;
-        siteName = siteName.replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '')    
-        gFolderName = siteName + ' ' + today;
+        await console.log('Начинаем тестирование');
+        imagesData.sitename = siteName;
+        let today = await getDate();
+        siteName = filterLink(siteName)
+        let gFolderName = siteName + ' ' + today;
         const folder = 'screenshots/' + siteName + ' ' + today + '/'
         const format = '.jpg'
         let mainFolderId = await gdrive.createFolder('1urf-n0KItOAjN9dl7xgLjLeT_Pt42fok', gFolderName);
-        for (const browserType of br) {
+        for (const browserType of browsers) {
             let childFolderId = await gdrive.createFolder(mainFolderId, browserType);
             const browser = await playwright[browserType].launch({headless: true});
             console.log('started for ' + browserType)
@@ -133,9 +155,8 @@ async function mkScreenshots(customLinks, br) {
                 } catch (error) {
                     console.log(error)
                 }
-                console.log('Делаем скриншот № ' + i )
+                console.log('Делаем скриншот № ' + (i + 1) + ' из ' + links.length)
                 await page.setDefaultNavigationTimeout(0);
-                await page.waitFor(3000) 
                 await page.screenshot({path: imageLocalPath, fullPage: true});
                 await fs.appendFileSync(folder + 'links.txt/', links[i] + '\r\n', 'utf8');
                 imagesData.names.push(imageName)
