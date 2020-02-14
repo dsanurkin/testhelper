@@ -15,9 +15,26 @@
     "@babel/cli": "^7.8.4",
     "@babel/core": "^7.8.4",
     "@babel/node": "^7.8.4",
-    "@babel/preset-env": "^7.8.4"
+    "@babel/preset-env": "^7.8.4",
+    "compress-images": "^1.5.8",
+    "jest": "^25.1.0"
   },
-  "scripts": {},
+  "scripts": {
+    "test": "jest"
+  },
   "author": "Denis Anurkin",
-  "license": "ISC"
+  "license": "ISC",
+  "directories": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dsanurkin/testhelper.git"
+  },
+  "keywords": [],
+  "bugs": {
+    "url": "https://github.com/dsanurkin/testhelper/issues"
+  },
+  "homepage": "https://github.com/dsanurkin/testhelper#readme",
+  "description": ""
 }

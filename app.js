@@ -11,6 +11,7 @@ const data = new AsyncNedb({
     filename: 'data/data.db',
     autoload: true,
 });
+var compress_images = require('compress-images');
 
 function checkRegress(image1, image2, diff){
     imgDiff({
@@ -43,7 +44,7 @@ async function findInDatabase(name) {
         let links = findLinks[0].links;
         return links
     }   else {
-        console.log('Список ссылок не найден!')
+        console.log('Список ссылок не найден!') 
         return false
     }
 };
@@ -67,10 +68,11 @@ async function getLinkFromTask() {
 };
 
 async function makeDeviceScreenshot(urls, dev) {
+    const { webkit, devices } = require('playwright');
     let device;
     switch(dev) {
         case 'iPad':
-            device = devices['iPad Pro 11'];
+            device = devices['iPad Mini'];
             break;
         case 'iPhone':
             device = devices['iPhone 6'];
@@ -80,6 +82,7 @@ async function makeDeviceScreenshot(urls, dev) {
             break;
     }
     for (let i = 0; i < urls.length; i++){
+        const screenshotName = urls[i].replace('https://', "").replace('http://', "").replace('www.', "").replace(/[\/#!$%\^&\*;?:{}=\_`~()]/g,"_") + '.png'
         const browser = await webkit.launch();
         const context = await browser.newContext({
             viewport: device.viewport,
@@ -87,25 +90,48 @@ async function makeDeviceScreenshot(urls, dev) {
         });
         const page = await context.newPage(urls[i], { waitUntil: 'load' });
         await page.setDefaultNavigationTimeout(0);
-        const screenshot_name = filterLink(urls[i]);
-        await page.screenshot({path: 'screenshots/' + dev + '/' + screenshot_name + '.png', fullPage: true});
+        await page.screenshot({path: dev + '/' + screenshotName, fullPage: true});
         await browser.close();
     }
+
+    // const { webkit, devices } = require('playwright');
+    // const iPhone = devices['iPhone 6'];
+
+    // (async () => {
+    //     const browser = await webkit.launch();
+    //     const context = await browser.newContext({
+    //         viewport: iPhone.viewport,
+    //         userAgent: iPhone.userAgent
+    //     });
+    //     const page = await context.newPage();
+    //     await page.goto('http://example.com');
+    //     // other actions...
+    //     await browser.close();
+    // })();
 }
 
 async function mkScreenshots(mainLink, customLinks, browsers) {
+    // customLinks = customLinks.filter(element => element !== '')
     let links = new Array();
     let imagesData = {
         names: new Array(),
-        localPaths: new Array(),
-        gdriveLinks: new Array(),
+        localPaths: {
+            chromium: new Array(),
+            firefox: new Array(),
+            webkit: new Array()
+        },
+        gdriveLinks: {
+            chromium: new Array(),
+            firefox: new Array(),
+            webkit: new Array()
+        },
         folderLink: null,
         sitename: null
     }
 
     if (mainLink) {
         let linksFound = await findInDatabase(mainLink);
-        if (linksFound) {
+        if (linksFound.length > 0) {
             siteName = filterLink(mainLink);
             links = linksFound;
             if (customLinks.length > 0) {
@@ -119,11 +145,14 @@ async function mkScreenshots(mainLink, customLinks, browsers) {
                 name: siteName,
                 links: links
             }
-            await data.asyncInsert(fileData)
+            // await data.asyncInsert(fileData)
         }
     } else {
         siteName = await getLinkFromTask();
         links = await findInDatabase(siteName);
+        if (links == false) {
+            return false
+        }
         if (customLinks.length > 0) {
             for(let i = 0; i < customLinks.length; i++) { links.push(customLinks[i]) }
         }
@@ -147,11 +176,10 @@ async function mkScreenshots(mainLink, customLinks, browsers) {
             fs.mkdirSync(folder + browserType + '/',{recursive: true }) 
             await page.setViewport({width: 1920, height: 1080, deviceScaleFactor: 1,});
             for (let i = 0; i < links.length; i++) {
-                let linkReplaced = links[i].replace('https://', "").replace('http://', "").replace('www.', "").replace(/[\/#!$%\^&\*;?:{}=\_`~()]/g,"_")
-                let imageName = linkReplaced + format;
+                let imageName = links[i].replace('https://', "").replace('http://', "").replace('www.', "").replace(/[\/#!$%\^&\*;?:{}=\_`~()]/g,"_") + format;
                 let imageLocalPath = folder + browserType + '/' + imageName;
                 try {
-                    await page.goto(links[i], { waitUntil: 'load'});
+                    await page.goto(links[i], { waitUntil: 'load'});   
                 } catch (error) {
                     console.log(error)
                 }
@@ -160,14 +188,17 @@ async function mkScreenshots(mainLink, customLinks, browsers) {
                 await page.screenshot({path: imageLocalPath, fullPage: true});
                 await fs.appendFileSync(folder + 'links.txt/', links[i] + '\r\n', 'utf8');
                 imagesData.names.push(imageName)
-                imagesData.localPaths.push('D:/screenshoter/server/' + imageLocalPath)
-                imagesData.gdriveLinks.push(await gdrive.insertFile(childFolderId, imagesData.names[i], imagesData.localPaths[i]))
+                imagesData.localPaths[browserType].push('D:/screenshoter/server/' + imageLocalPath)
+                imagesData.gdriveLinks[browserType].push(await gdrive.insertFile(childFolderId, imagesData.names[i], imagesData.localPaths[browserType][i]))                                      
             }
             await browser.close()
         }
         imagesData.folderLink = 'https://drive.google.com/drive/folders/' + mainFolderId + '?usp=sharing';
         console.log(imagesData.folderLink);
-        clipboardy.writeSync(imagesData.folderLink);
+        // clipboardy.writeSync(imagesData.folderLink);
+        // for(let i = 0; i < links.length; i++) {
+        //     checkRegress(imagesData.localPaths.chromium[i], imagesData.localPaths.firefox[i], folder + 'crossBrowser/' + imagesData.names[i])
+        // }
         console.log('Тестирование завершено!')
         notifier.notify('Тестирование закончено!');
     }
@@ -177,3 +208,5 @@ async function mkScreenshots(mainLink, customLinks, browsers) {
 module.exports.mkScreenshots = mkScreenshots;
 module.exports.checkRegress = checkRegress;
 module.exports.makeDeviceScreenshot = makeDeviceScreenshot;
+module.exports.filterLink = filterLink;
+module.exports.findInDatabase = findInDatabase;
