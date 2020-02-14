@@ -1,140 +1,17 @@
-// const { webkit, chromium, firefox, devices } = require('playwright');
 // const babel = require("@babel/core").transform("code", options);
 const playwright = require('playwright');
 const fs = require('fs')
 const notifier = require('node-notifier');
-const $ = require('jQuery');
 const { imgDiff } = require('img-diff-js');
 const path = require('path')
 const clipboardy = require('clipboardy');
-let links = new Array();
-let folder_name;
-let path_arr = new Array();
 const { AsyncNedb } = require('nedb-async');
+const gdrive = require('./gdrive')
 const data = new AsyncNedb({
-  filename: 'data/data.db',
-  autoload: true,
+    filename: 'data/data.db',
+    autoload: true,
 });
-img_urls = new Array();
-
-const {google} = require('googleapis');
-
-// If modifying these scopes, delete token.json.
-const SCOPES = ['https://www.googleapis.com/auth/drive'];
-// The file token.json stores the user's access and refresh tokens, and is
-// created automatically when the authorization flow completes for the first
-// time.
-const TOKEN_PATH = 'token.json';
-
-function insFile(parentFolderId, imgName, imgBody) {
-    (function () {
-        fs.readFile('credentials.json', (err, content) => {
-            if (err) return console.log('Error loading client secret file:', err);
-            // Authorize a client with credentials, then call the Google Drive API.
-            authorize(JSON.parse(content), insertFile);
-        });
-    })();
-    function insertFile(auth) {
-        console.log("auth", JSON.stringify(auth));
-        const drive = google.drive({version: 'v3', auth});
-        console.log('parentfolderid = ' + parentFolderId)
-        let folderId = parentFolderId;
-        var fileMetadata = {
-            'name': imgName,
-            parents: [folderId]
-        };
-        var media = {
-            mimeType: 'image/jpeg',
-            body: fs.createReadStream(imgBody)
-        };
-        drive.files.create({
-            resource: fileMetadata,
-            media: media,
-            fields: 'id'
-        })
-        .then(function(response) {
-            // Handle the results here (response.result has the parsed body).
-            // console.log("Response", response);
-            img_urls.push('https://drive.google.com/uc?id=' + response.data.id)
-            // console.log('image ID ' + response.data.id);
-            // inFolderId = response.data.id;
-            // console.log(' THEN INFOLDERID ' + inFolderId)
-            // insertFile();
-        },
-        function(err) { 
-          // handle error here.
-            console.error("Execute error", err); 
-        });
-    }
-}
-
-/**
- * Create an OAuth2 client with the given credentials, and then execute the
- * given callback function.
- * @param {Object} credentials The authorization client credentials.
- * @param {function} callback The callback to call with the authorized client.
- */
-function authorize(credentials, callback) {
-  const {client_secret, client_id, redirect_uris} = credentials.installed;
-  const oAuth2Client = new google.auth.OAuth2(
-      client_id, client_secret, redirect_uris[0]);
-
-  // Check if we have previously stored a token.
-  fs.readFile(TOKEN_PATH, (err, token) => {
-    if (err) return getAccessToken(oAuth2Client, callback);
-    oAuth2Client.setCredentials(JSON.parse(token));
-    callback(oAuth2Client);
-  });
-}
-
-/**
- * Get and store new token after prompting for user authorization, and then
- * execute the given callback with the authorized OAuth2 client.
- * @param {google.auth.OAuth2} oAuth2Client The OAuth2 client to get token for.
- * @param {getEventsCallback} callback The callback for the authorized client.
- */
-function getAccessToken(oAuth2Client, callback) {
-  const authUrl = oAuth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: SCOPES,
-  });
-  console.log('Authorize this app by visiting this url:', authUrl);
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  rl.question('Enter the code from that page here: ', (code) => {
-    rl.close();
-    oAuth2Client.getToken(code, (err, token) => {
-      if (err) return console.error('Error retrieving access token', err);
-      oAuth2Client.setCredentials(token);
-      // Store the token to disk for later program executions
-      fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
-        if (err) return console.error(err);
-        console.log('Token stored to', TOKEN_PATH);
-      });
-      callback(oAuth2Client);
-    });
-  });
-}
-
-let returnedImages = function() {
-  return img_urls
-}
-
-function check(name) {
-  (async () => {
-      folder_name = name.replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '')            
-      let findLinks = await data.asyncFind({ name: folder_name });
-      if (findLinks.length > 0) {
-          links = findLinks[0].links;
-      }
-      urlsFound = (findLinks.length > 0) ? true : false
-      if (urlsFound === false) {
-          console.log('Список ссылок не найден!')
-      }
-  })();
-};
+var compress_images = require('compress-images');
 
 function checkRegress(image1, image2, diff){
     imgDiff({
@@ -144,11 +21,58 @@ function checkRegress(image1, image2, diff){
     }).then(result => console.log(result.imagesAreSame));
 }
 
+async function getDate(){
+    let today = new Date();
+    let dd = String(today.getDate()).padStart(2, '0');
+    let mm = String(today.getMonth() + 1).padStart(2, '0');
+    let yyyy = today.getFullYear();
+    let hours = today.getHours() + '_' + today.getMinutes();
+    today = mm + '-' + dd + '-' + yyyy + '-' + hours;
+    return today
+}
+
+function filterLink(link){
+    link = link.replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '');
+    return link     
+}
+
+async function findInDatabase(name) {
+    name = filterLink(name);        
+    let findLinks = await data.asyncFind({ name: name });
+    if (findLinks.length > 0) {
+        console.log('Список ссылок найден!')
+        let links = findLinks[0].links;
+        return links
+    }   else {
+        console.log('Список ссылок не найден!') 
+        return false
+    }
+};
+
+async function getLinkFromTask() {
+    const browser = await playwright.chromium.launch({headless: true}); // or 'webkit', 'firefox'
+    const context = await browser.newContext();
+    const page = await context.newPage('http://otp.demis.ru/smoke/tt/', { waitUntil: 'load' });
+    await page.type('body > form > table > tbody > tr:nth-child(1) > td:nth-child(2) > input[type=text]', 'd.anurkin@demis.ru');
+    await page.type('body > form > table > tbody > tr:nth-child(2) > td:nth-child(2) > input[type=password]', 'St847CyQ');
+    await page.click('body > form > table > tbody > tr:nth-child(3) > td > input[type=submit]');
+    await console.log('Вход выполнен');
+    await page.waitForSelector('body > div.navbar > div > a.btn.btn.btn-success');
+    await page.click('body > div.navbar > div > a.btn.btn.btn-success');
+    siteName = await page.$('h2 > a');
+    siteName = await siteName.getProperty('href');
+    siteName = await siteName.jsonValue();
+    console.log('Взята ссылка на ' + siteName);
+    await browser.close();
+    return siteName
+};
+
 async function makeDeviceScreenshot(urls, dev) {
+    const { webkit, devices } = require('playwright');
     let device;
     switch(dev) {
         case 'iPad':
-            device = devices['iPad Pro 11'];
+            device = devices['iPad Mini'];
             break;
         case 'iPhone':
             device = devices['iPhone 6'];
@@ -158,185 +82,131 @@ async function makeDeviceScreenshot(urls, dev) {
             break;
     }
     for (let i = 0; i < urls.length; i++){
+        const screenshotName = urls[i].replace('https://', "").replace('http://', "").replace('www.', "").replace(/[\/#!$%\^&\*;?:{}=\_`~()]/g,"_") + '.png'
         const browser = await webkit.launch();
         const context = await browser.newContext({
             viewport: device.viewport,
             userAgent: device.userAgent
         });
-        console.log('1')
         const page = await context.newPage(urls[i], { waitUntil: 'load' });
-        console.log('2')
         await page.setDefaultNavigationTimeout(0);
-        console.log('3') 
-        const screenshot_name = urls[i].replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '')
-        await page.screenshot({path: 'screenshots/' + dev + '/' + screenshot_name + '.png', fullPage: true});
+        await page.screenshot({path: dev + '/' + screenshotName, fullPage: true});
         await browser.close();
     }
+
+    // const { webkit, devices } = require('playwright');
+    // const iPhone = devices['iPhone 6'];
+
+    // (async () => {
+    //     const browser = await webkit.launch();
+    //     const context = await browser.newContext({
+    //         viewport: iPhone.viewport,
+    //         userAgent: iPhone.userAgent
+    //     });
+    //     const page = await context.newPage();
+    //     await page.goto('http://example.com');
+    //     // other actions...
+    //     await browser.close();
+    // })();
 }
 
-let mkScreenshots = async function(url, br, callback) {
-    let mainFolderId;
-    let childFolderId;
-    function fId(parentFolderId, gfolderName, firstCreate) {
-        (function () {
-            fs.readFile('credentials.json', (err, content) => {
-                if (err) return console.log('Error loading client secret file:', err);
-                // Authorize a client with credentials, then call the Google Drive API.
-                authorize(JSON.parse(content), gFolderId);
-            });
-        })();
-        function gFolderId(auth) {
-            console.log("auth", JSON.stringify(auth));
-            const drive = google.drive({version: 'v3', auth});
-            let folderId = parentFolderId;
-            var fileMetadata = {
-                'name': gfolderName,
-                'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [folderId]
-            };
-            drive.files.create({
-                resource: fileMetadata,
-                fields: 'id',
-            })
-            .then(function(response) {
-
-                if (firstCreate === true) {
-                    mainFolderId = response.data.id;
-                    console.log('MAINFOLDER CREATED')
-                } else {
-                    childFolderId = response.data.id;
-                    console.log('CHILDFOLDER CREATED')
-                }
-            },
-            function(err) { 
-                console.error("Execute error", err); 
-            });
-        }
-    }
-    async function getLinkFromTask() {
-        const browserType = 'chromium'
-        const browser = await playwright[browserType].launch({headless: true}); // or 'webkit', 'firefox'
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        await page.goto('http://otp.demis.ru/smoke/tt/', { waitUntil: 'load' });
-        await page.type('body > form > table > tbody > tr:nth-child(1) > td:nth-child(2) > input[type=text]', 'd.anurkin@demis.ru');
-        await page.type('body > form > table > tbody > tr:nth-child(2) > td:nth-child(2) > input[type=password]', 'St847CyQ');
-        await page.click('body > form > table > tbody > tr:nth-child(3) > td > input[type=submit]');
-        await console.log('Вход выполнен');
-        let siteName = async function(){
-            await page.waitForSelector('body > div.navbar > div > a.btn.btn.btn-success');
-            await page.click('body > div.navbar > div > a.btn.btn.btn-success');
-            siteName = await page.$('h2 > a');
-            siteName = await siteName.getProperty('href');
-            siteName = await siteName.jsonValue();
-            await browser.close();
-            console.log('Взята ссылка на ' + siteName);
-            return siteName
-        };
-        await siteName();
-        await check(siteName);
-    };
-
-    if (url.length > 0) {
-        links = url;
-        folder_name = links[links.length - 1].replace('https://', "").replace('http://', "").replace('www.', "").replace('/', '');
-        let fileData = {
-            name: folder_name,
-            links: links
-        }
-        await data.asyncInsert(fileData)
-    } else {
-        await getLinkFromTask();
+async function mkScreenshots(mainLink, customLinks, browsers) {
+    // customLinks = customLinks.filter(element => element !== '')
+    let links = new Array();
+    let imagesData = {
+        names: new Array(),
+        localPaths: {
+            chromium: new Array(),
+            firefox: new Array(),
+            webkit: new Array()
+        },
+        gdriveLinks: {
+            chromium: new Array(),
+            firefox: new Array(),
+            webkit: new Array()
+        },
+        folderLink: null,
+        sitename: null
     }
 
-    let img_path_promise = new Promise (async function(resolve, reject){
-        try {
-            path_arr = [];
-            img_urls = [];
-            await console.log('Начинаем тестирование')
-            let today = new Date()
-            let dd = String(today.getDate()).padStart(2, '0')
-            let mm = String(today.getMonth() + 1).padStart(2, '0')
-            let yyyy = today.getFullYear()
-            let hours = today.getHours() + '_' + today.getMinutes()
-            today = mm + '-' + dd + '-' + yyyy + '-' + hours
-            gfol = folder_name + ' ' + today;
-            const folder = 'screenshots/' + folder_name + ' ' + today + '/'
-            const format = '.jpg'
-            let browserType;
-            await fId('1urf-n0KItOAjN9dl7xgLjLeT_Pt42fok', gfol, true);
-            switch(br) {
-                case 'firefox':
-                    browserType = 'firefox';
-                    break;
-                case 'chrome':
-                    browserType = 'chromium';
-                    break;
-                case 'webkit':
-                    browserType = 'webkit';
-                    break;
+    if (mainLink) {
+        let linksFound = await findInDatabase(mainLink);
+        if (linksFound.length > 0) {
+            siteName = filterLink(mainLink);
+            links = linksFound;
+            if (customLinks.length > 0) {
+                for(let i = 0; i < customLinks.length; i++) { links.push(customLinks[i]) }
             }
-            // for (const browserType of ['chromium', 'firefox', 'webkit']) {
-            //     const browser = await playwright[browserType].launch();
-            //     await page.screenshot({ path: `example-${browserType}.png` });
-            // }
-            const browser = await playwright[browserType].launch({headless: true}); // or 'webkit', 'firefox'
+        } else {
+            siteName = filterLink(mainLink);
+            links = customLinks;
+            links.push(mainLink);
+            let fileData = {
+                name: siteName,
+                links: links
+            }
+            // await data.asyncInsert(fileData)
+        }
+    } else {
+        siteName = await getLinkFromTask();
+        links = await findInDatabase(siteName);
+        if (links == false) {
+            return false
+        }
+        if (customLinks.length > 0) {
+            for(let i = 0; i < customLinks.length; i++) { links.push(customLinks[i]) }
+        }
+    }
+
+    if (links.length > 0) { 
+        await console.log('Начинаем тестирование');
+        imagesData.sitename = siteName;
+        let today = await getDate();
+        siteName = filterLink(siteName)
+        let gFolderName = siteName + ' ' + today;
+        const folder = 'screenshots/' + siteName + ' ' + today + '/'
+        const format = '.jpg'
+        let mainFolderId = await gdrive.createFolder('1urf-n0KItOAjN9dl7xgLjLeT_Pt42fok', gFolderName);
+        for (const browserType of browsers) {
+            let childFolderId = await gdrive.createFolder(mainFolderId, browserType);
+            const browser = await playwright[browserType].launch({headless: true});
+            console.log('started for ' + browserType)
             const context = await browser.newContext();
             const page = await context.newPage();
-            links = links.filter(element => element !== '')
-            if (links.length > 0) { fs.mkdirSync(folder + browserType + '/',{recursive: true }) }
-            await page.setViewport({
-                width: 1920,
-                height: 1080,
-                deviceScaleFactor: 1,
-            });
-            setTimeout(function(){
-                fId(mainFolderId, browserType, false)
-            }, 5000)
+            fs.mkdirSync(folder + browserType + '/',{recursive: true }) 
+            await page.setViewport({width: 1920, height: 1080, deviceScaleFactor: 1,});
             for (let i = 0; i < links.length; i++) {
-                let link_replaced = links[i].replace('https://', "").replace('http://', "").replace('www.', "").replace(/[\/#!$%\^&\*;?:{}=\_`~()]/g,"_")
-                let img_name = link_replaced + format;
-                let link_path = folder + browserType + '/' + img_name;
-                // let imgurl = 'https://drive.google.com/uc?id=' + img_urls[i]
+                let imageName = links[i].replace('https://', "").replace('http://', "").replace('www.', "").replace(/[\/#!$%\^&\*;?:{}=\_`~()]/g,"_") + format;
+                let imageLocalPath = folder + browserType + '/' + imageName;
                 try {
-                    await page.goto(links[i], { waitUntil: 'load'});
-                    console.log('Делаем скриншот № ' + i )
-                    await page.setDefaultNavigationTimeout(0);
-                    await page.waitFor(2000) 
-                    await page.screenshot({path: link_path, fullPage: true});
-                    await fs.appendFileSync(folder + 'links.txt/', links[i] + '\r\n', 'utf8');
-                    path_arr.push(link_path)
-                    await insFile(childFolderId, img_name, 'D:/screenshoter/server/' + link_path)
+                    await page.goto(links[i], { waitUntil: 'load'});   
                 } catch (error) {
                     console.log(error)
                 }
+                console.log('Делаем скриншот № ' + (i + 1) + ' из ' + links.length)
+                await page.setDefaultNavigationTimeout(0);
+                await page.screenshot({path: imageLocalPath, fullPage: true});
+                await fs.appendFileSync(folder + 'links.txt/', links[i] + '\r\n', 'utf8');
+                imagesData.names.push(imageName)
+                imagesData.localPaths[browserType].push('D:/screenshoter/server/' + imageLocalPath)
+                imagesData.gdriveLinks[browserType].push(await gdrive.insertFile(childFolderId, imagesData.names[i], imagesData.localPaths[browserType][i]))                                      
             }
-            console.log('MAINFOLDERID ' + mainFolderId)
-            let copyTarget = 'https://drive.google.com/drive/folders/' + mainFolderId + '?usp=sharing'
-            console.log(copyTarget)
-            links = [];
             await browser.close()
-            clipboardy.writeSync(copyTarget);
-            resolve();
-            await callback()
-        } catch (err) {
-            reject();
-            console.log(err)
         }
-        
-    });
-  img_path_promise.then(function(){
-      returnedImages();
-      console.log('Тестирование завершено!')
-      notifier.notify('Тестирование закончено!');
-  });
-  img_path_promise.catch(function(){
-    console.log('err')
-  });
-};
+        imagesData.folderLink = 'https://drive.google.com/drive/folders/' + mainFolderId + '?usp=sharing';
+        console.log(imagesData.folderLink);
+        // clipboardy.writeSync(imagesData.folderLink);
+        // for(let i = 0; i < links.length; i++) {
+        //     checkRegress(imagesData.localPaths.chromium[i], imagesData.localPaths.firefox[i], folder + 'crossBrowser/' + imagesData.names[i])
+        // }
+        console.log('Тестирование завершено!')
+        notifier.notify('Тестирование закончено!');
+    }
+    return imagesData
+}
 
 module.exports.mkScreenshots = mkScreenshots;
-module.exports.returnedImages = returnedImages;
 module.exports.checkRegress = checkRegress;
 module.exports.makeDeviceScreenshot = makeDeviceScreenshot;
-// module.exports.authAndStore = googleDrive;
+module.exports.filterLink = filterLink;
+module.exports.findInDatabase = findInDatabase;
