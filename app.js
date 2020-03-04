@@ -138,7 +138,7 @@ async function mkScreenshots(mainLink, customLinks, browsers) {
         let gFolderName = siteName + ' ' + today;
         const folder = 'screenshots/' + siteName + ' ' + today + '/'
         const format = '.jpg'
-        let mainFolderId = await gdrive.createFolder('1urf-n0KItOAjN9dl7xgLjLeT_Pt42fok', gFolderName);
+        let mainFolderId = await gdrive.createFolder('1mdxXUkWz8-8i4tV9kqtDWPo_XTDzD1Y1', gFolderName);
         for (const browserType of browsers) {
             let childFolderId = await gdrive.createFolder(mainFolderId, browserType);
             const browser = await playwright[browserType].launch({headless: true});
@@ -160,7 +160,7 @@ async function mkScreenshots(mainLink, customLinks, browsers) {
                 await page.screenshot({path: imageLocalPath, fullPage: true});
                 await fs.appendFileSync(folder + 'links.txt/', links[i] + '\r\n', 'utf8');
                 imagesData.names.push(imageName)
-                imagesData.localPaths[browserType].push('D:/screenshoter/server/' + imageLocalPath)
+                imagesData.localPaths[browserType].push(path.dirname(__dirname) + '/' + imageLocalPath)
                 imagesData.gdriveLinks[browserType].push(await gdrive.insertFile(childFolderId, imagesData.names[i], imagesData.localPaths[browserType][i]))                                      
             }
             await browser.close()
