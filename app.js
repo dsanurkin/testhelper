@@ -1,4 +1,3 @@
-// const babel = require("@babel/core").transform("code", options);
 const playwright = require('playwright');
 const fs = require('fs')
 const notifier = require('node-notifier');
@@ -47,24 +46,6 @@ async function findInDatabase(name) {
         console.log('Список ссылок не найден!') 
         return false
     }
-};
-
-async function getLinkFromTask() {
-    const browser = await playwright.chromium.launch({headless: true}); // or 'webkit', 'firefox'
-    const context = await browser.newContext();
-    const page = await context.newPage('http://otp.demis.ru/smoke/tt/', { waitUntil: 'load' });
-    await page.type('body > form > table > tbody > tr:nth-child(1) > td:nth-child(2) > input[type=text]', 'd.anurkin@demis.ru');
-    await page.type('body > form > table > tbody > tr:nth-child(2) > td:nth-child(2) > input[type=password]', 'St847CyQ');
-    await page.click('body > form > table > tbody > tr:nth-child(3) > td > input[type=submit]');
-    await console.log('Вход выполнен');
-    await page.waitForSelector('body > div.navbar > div > a.btn.btn.btn-success');
-    await page.click('body > div.navbar > div > a.btn.btn.btn-success');
-    siteName = await page.$('h2 > a');
-    siteName = await siteName.getProperty('href');
-    siteName = await siteName.jsonValue();
-    console.log('Взята ссылка на ' + siteName);
-    await browser.close();
-    return siteName
 };
 
 async function makeDeviceScreenshot(urls, dev) {
@@ -147,15 +128,6 @@ async function mkScreenshots(mainLink, customLinks, browsers) {
             }
             // await data.asyncInsert(fileData)
         }
-    } else {
-        siteName = await getLinkFromTask();
-        links = await findInDatabase(siteName);
-        if (links == false) {
-            return false
-        }
-        if (customLinks.length > 0) {
-            for(let i = 0; i < customLinks.length; i++) { links.push(customLinks[i]) }
-        }
     }
 
     if (links.length > 0) { 
@@ -195,7 +167,7 @@ async function mkScreenshots(mainLink, customLinks, browsers) {
         }
         imagesData.folderLink = 'https://drive.google.com/drive/folders/' + mainFolderId + '?usp=sharing';
         console.log(imagesData.folderLink);
-        // clipboardy.writeSync(imagesData.folderLink);
+        clipboardy.writeSync(imagesData.folderLink);
         // for(let i = 0; i < links.length; i++) {
         //     checkRegress(imagesData.localPaths.chromium[i], imagesData.localPaths.firefox[i], folder + 'crossBrowser/' + imagesData.names[i])
         // }
