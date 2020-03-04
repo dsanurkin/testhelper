@@ -10,7 +10,7 @@ const data = new AsyncNedb({
     filename: 'data/data.db',
     autoload: true,
 });
-// var compress_images = require('compress-images');
+
 
 function checkRegress(image1, image2, diff){
     imgDiff({
